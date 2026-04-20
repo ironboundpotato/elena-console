@@ -1,3 +1,15 @@
+## Live Behavior Demonstration
+
+The system deterministically routes requests into three execution paths:
+
+| Input Type | Decision | Behavior |
+|------------|--------|----------|
+| Benign     | APPROVED | Executes action |
+| Deceptive  | REFUSED | Blocks execution |
+| Ambiguous  | CLARIFICATION_REQUIRED | Pauses execution |
+
+This demonstrates a governance-first execution model where all actions are gated prior to runtime.
+
 # elena-console
 
 E.L.E.N.A. Console is a lightweight observability layer for the governed partner stack.
