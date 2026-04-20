@@ -10,7 +10,7 @@ The system deterministically routes requests into three execution paths:
 | Deceptive  | REFUSED | Blocks execution |
 | Ambiguous  | CLARIFICATION_REQUIRED | Pauses execution |
 
-This demonstrates a governance-first execution model where all actions are gated prior to runtime.
+This enforces a governance-first execution model where no action is allowed without prior approval.
 
 # elena-console
 
