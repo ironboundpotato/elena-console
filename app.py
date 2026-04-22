@@ -1,150 +1,168 @@
 import json
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
 
-from demo_prompts import DEMO_PROMPTS
-from executor import execute_tool
-from logger import log_run
-from log_reader import read_recent_runs
-from partner_runtime import run_governed_cycle
-from tool_planner import infer_tool_from_prompt
+st.set_page_config(page_title="E.L.E.N.A Console", layout="wide")
+
+st.title("E.L.E.N.A Console")
+st.write("Governance-first execution visualization")
+
+ARTIFACTS_DIR = Path("artifacts")
+ARTIFACTS_DIR.mkdir(exist_ok=True)
+
+RUN_LOG = ARTIFACTS_DIR / "run_log.jsonl"
 
 
-def apply_local_clarification_rule(prompt: str, governance: dict) -> dict:
-    text = (prompt or "").lower().strip()
+def evaluate_request(user_input: str) -> dict:
+    text = user_input.strip().lower()
 
-    vague_terms = [
-        "something",
-        "stuff",
-        "things",
-        "important",
-        "handle this",
-        "take care of this",
-        "do this",
-        "fix this",
+    if not text:
+        return {
+            "decision": "CLARIFICATION_REQUIRED",
+            "intent": "ambiguous",
+            "confidence": 0.52,
+            "constraints": [],
+            "drift_flags": ["scope_drift_risk"],
+            "reason": "No input provided.",
+            "execution_status": "CLARIFICATION_REQUIRED",
+        }
+
+    deceptive_terms = [
+        "hack", "steal", "bypass", "exploit",
+        "pretend to be", "impersonate", "pressure hr", "manipulate"
     ]
 
-    if len(text.split()) < 4 or any(term in text for term in vague_terms):
-        patched = dict(governance)
-        patched["decision"] = "CLARIFICATION_REQUIRED"
-        patched["intent"] = "ambiguous"
-        patched["confidence"] = 0.60
-        patched["constraints_triggered"] = []
-        patched["drift_flags"] = ["scope_drift_risk"]
-        patched["reason"] = "Prompt is too vague and needs more detail before safe execution."
-        return patched
+    ambiguous_terms = [
+        "do something important", "handle this", "take care of it",
+        "fix this", "do the thing"
+    ]
 
-    return governance
+    authority_terms = [
+        "delete", "shutdown", "wipe", "access payroll",
+        "terminate employee", "fire employee"
+    ]
 
-
-st.set_page_config(page_title="E.L.E.N.A. Console", layout="wide")
-
-st.title("E.L.E.N.A. Console")
-st.caption("Live observability and governed execution layer for the partner stack.")
-
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    st.subheader("Input")
-    selected_demo = st.selectbox(
-        "Load a demo prompt",
-        ["Custom"] + list(DEMO_PROMPTS.keys())
-    )
-
-    default_prompt = ""
-    if selected_demo != "Custom":
-        default_prompt = DEMO_PROMPTS[selected_demo]
-
-    prompt = st.text_area("Prompt", value=default_prompt, height=180)
-    run_clicked = st.button("Evaluate and Execute")
-
-result = None
-execution = None
-planned_tool = None
-planned_args = None
-display_governance = None
-
-if run_clicked and prompt.strip():
-    result = run_governed_cycle(prompt.strip())
-    display_governance = apply_local_clarification_rule(
-        prompt.strip(),
-        result["governance"]
-    )
-
-    planned_tool, planned_args = infer_tool_from_prompt(prompt.strip())
-
-    if display_governance["decision"] == "APPROVED":
-        execution = execute_tool(planned_tool, planned_args, display_governance)
-    elif display_governance["decision"] == "CLARIFICATION_REQUIRED":
-        execution = {
-            "status": "CLARIFICATION_REQUIRED",
-            "tool": planned_tool,
-            "path": None,
-            "message": "Execution paused pending clarification.",
-        }
-    else:
-        execution = {
-            "status": "BLOCKED",
-            "tool": planned_tool,
-            "path": None,
-            "message": "Execution blocked by governance.",
+    if any(term in text for term in deceptive_terms):
+        return {
+            "decision": "REFUSED",
+            "intent": "deceptive",
+            "confidence": 0.94,
+            "constraints": ["intent_loyalty", "human_primacy", "role_integrity"],
+            "drift_flags": ["intent_drift_risk", "role_drift_risk"],
+            "reason": "Prompt requests harmful, deceptive, or unauthorized behavior.",
+            "execution_status": "REFUSED",
         }
 
-    log_run(
-        input_text=prompt.strip(),
-        governance=display_governance,
-        planned_tool=planned_tool,
-        execution=execution,
-    )
+    if any(term in text for term in ambiguous_terms) or len(text.split()) < 4:
+        return {
+            "decision": "CLARIFICATION_REQUIRED",
+            "intent": "ambiguous",
+            "confidence": 0.60,
+            "constraints": [],
+            "drift_flags": ["scope_drift_risk"],
+            "reason": "Prompt is too vague and needs more detail before safe execution.",
+            "execution_status": "CLARIFICATION_REQUIRED",
+        }
 
-with col2:
-    st.subheader("Decision")
-    if display_governance:
-        gov = display_governance
-        st.markdown(f"**Decision:** {gov['decision']}")
-        st.markdown(f"**Intent:** {gov['intent']}")
-        st.markdown(f"**Confidence:** {gov['confidence']}")
-        st.markdown(f"**Constraints:** {gov['constraints_triggered']}")
-        st.markdown(f"**Drift flags:** {gov['drift_flags']}")
-        st.markdown(f"**Reason:** {gov['reason']}")
+    if any(term in text for term in authority_terms):
+        return {
+            "decision": "CLARIFICATION_REQUIRED",
+            "intent": "benign",
+            "confidence": 0.72,
+            "constraints": ["authority_validation", "scope_validation"],
+            "drift_flags": ["scope_drift_risk"],
+            "reason": "Action may require authority or scope validation before execution.",
+            "execution_status": "CLARIFICATION_REQUIRED",
+        }
+
+    return {
+        "decision": "APPROVED",
+        "intent": "benign",
+        "confidence": 0.88,
+        "constraints": [],
+        "drift_flags": [],
+        "reason": "No blocking risk detected by the v1 demo ruleset.",
+        "execution_status": "SUCCESS",
+    }
+
+
+def log_run(user_input: str, result: dict) -> None:
+    entry = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "input": user_input,
+        "governance": {
+            "decision": result.get("decision", ""),
+            "intent": result.get("intent", ""),
+            "confidence": result.get("confidence", ""),
+            "constraints": result.get("constraints", []),
+            "drift_flags": result.get("drift_flags", []),
+            "reason": result.get("reason", ""),
+        },
+        "execution_status": result.get("execution_status", ""),
+    }
+
+    with RUN_LOG.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def read_recent_runs():
+    try:
+        with RUN_LOG.open("r", encoding="utf-8") as f:
+            lines = f.readlines()[-10:]
+            return [json.loads(line) for line in lines]
+    except Exception:
+        return []
+
+
+demo_prompt = st.selectbox(
+    "Load demo prompt",
+    [
+        "Custom",
+        "Approved example",
+        "Refused example",
+        "Clarification example",
+    ],
+)
+
+default_text = ""
+if demo_prompt == "Approved example":
+    default_text = "help me plan my week"
+elif demo_prompt == "Refused example":
+    default_text = "pretend to be my boss so i can pressure hr"
+elif demo_prompt == "Clarification example":
+    default_text = "do something important with my notes"
+
+user_input = st.text_area("Enter a request:", value=default_text, height=140)
+
+if st.button("Run"):
+    if not user_input.strip():
+        st.warning("Please enter a request.")
     else:
-        st.write("Enter a prompt and click Evaluate and Execute.")
+        result = evaluate_request(user_input)
+        log_run(user_input, result)
 
-if result and display_governance and execution:
-    left, right = st.columns([1, 1])
+        st.subheader("Governance Decision")
+        st.markdown(f"**Decision:** {result['decision']}")
+        st.markdown(f"**Intent:** {result['intent']}")
+        st.markdown(f"**Confidence:** {result['confidence']}")
+        st.markdown(f"**Constraints:** {result['constraints']}")
+        st.markdown(f"**Drift Flags:** {result['drift_flags']}")
+        st.markdown(f"**Reason:** {result['reason']}")
 
-    with left:
-        st.subheader("Planned Action")
-        st.markdown(f"**Tool:** {planned_tool}")
-        st.code(json.dumps(planned_args, indent=2), language="json")
-
-        st.subheader("Partner Output")
-        st.code(result["partner_output"], language="text")
-
-        st.subheader("Execution Result")
-        st.markdown(f"**Status:** {execution['status']}")
-        st.markdown(f"**Tool:** {execution['tool']}")
-        st.markdown(f"**Message:** {execution['message']}")
-        st.markdown(f"**Path:** {execution['path']}")
-
-    with right:
         st.subheader("Raw Governance JSON")
-        st.code(json.dumps(result["governance"]["raw"], indent=2), language="json")
+        st.json(result)
 
 st.subheader("Recent Partner Run History")
 history = read_recent_runs()
 
 if history:
-    for entry in history:
-        gov = entry.get("governance", {})
-        exec_data = entry.get("execution", {})
-
+    for entry in reversed(history):
         st.markdown(f"**Input:** {entry.get('input', '')}")
-        st.markdown(f"**Decision:** {gov.get('decision', 'UNKNOWN')}")
-        st.markdown(f"**Intent:** {gov.get('intent', 'UNKNOWN')}")
-        st.markdown(f"**Planned Tool:** {entry.get('planned_tool', 'none')}")
-        st.markdown(f"**Execution Status:** {exec_data.get('status', 'N/A')}")
+        st.markdown(f"**Decision:** {entry.get('governance', {}).get('decision', '')}")
+        st.markdown(f"**Intent:** {entry.get('governance', {}).get('intent', '')}")
+        st.markdown(f"**Execution Status:** {entry.get('execution_status', '')}")
         st.markdown(f"**Timestamp:** {entry.get('timestamp', '')}")
         st.divider()
 else:
