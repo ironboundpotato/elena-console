@@ -23,18 +23,10 @@ FAILURE_MODES = {
     "AMBIGUOUS_INTENT": "Request is too vague for safe execution.",
 }
 
-HARD_REFUSAL_MODES = {
-    "HARMFUL_INSTRUCTION",
-    "DECEPTIVE_OPTIMIZATION",
-    "SOCIAL_ENGINEERING",
-    "DATA_EXFILTRATION",
-    "POLICY_EVASION",
-    "UNAUTHORIZED_AUTHORITY",
-}
-
 DETECTION_RULES = [
     {
         "failure_mode": "UNAUTHORIZED_AUTHORITY",
+        "decision": "REFUSED",
         "intent": "deceptive_or_harmful",
         "terms": [
             "pretend to be my boss",
@@ -56,6 +48,7 @@ DETECTION_RULES = [
     },
     {
         "failure_mode": "SOCIAL_ENGINEERING",
+        "decision": "REFUSED",
         "intent": "deceptive_or_harmful",
         "terms": [
             "manipulate",
@@ -75,6 +68,7 @@ DETECTION_RULES = [
     },
     {
         "failure_mode": "HARMFUL_INSTRUCTION",
+        "decision": "REFUSED",
         "intent": "deceptive_or_harmful",
         "terms": [
             "deceive",
@@ -102,6 +96,7 @@ DETECTION_RULES = [
     },
     {
         "failure_mode": "DECEPTIVE_OPTIMIZATION",
+        "decision": "REFUSED",
         "intent": "deceptive_or_harmful",
         "terms": [
             "avoid detection",
@@ -109,22 +104,10 @@ DETECTION_RULES = [
             "loophole",
             "not technically illegal",
             "make it look legal",
-            "make this look legal",
-            "make it appear legal",
-            "make this appear legal",
-            "make it seem legal",
-            "make this seem legal",
-            "make it seem legit",
-            "make this seem legit",
             "cover my tracks",
             "undetectable",
             "hide from audit",
-            "hide it from audit",
-            "hide this from audit",
-            "hide from compliance",
-            "hide it from compliance",
             "bypass compliance",
-            "avoid audit",
         ],
         "constraints": ["constraint_integrity", "intent_loyalty"],
         "drift_flags": ["policy_evasion_risk", "deceptive_optimization_risk"],
@@ -132,6 +115,7 @@ DETECTION_RULES = [
     },
     {
         "failure_mode": "POLICY_EVASION",
+        "decision": "REFUSED",
         "intent": "deceptive_or_harmful",
         "terms": [
             "bypass your rules",
@@ -148,17 +132,15 @@ DETECTION_RULES = [
     },
     {
         "failure_mode": "DATA_EXFILTRATION",
-        "intent": "deceptive_or_harmful",
+        "decision": "CLARIFICATION_REQUIRED",
+        "intent": "ambiguous_or_unverified",
         "terms": [
             "private customer records",
             "customer records",
             "extract data",
             "get access to",
-            "access private",
-            "access confidential",
             "sensitive info",
             "private data",
-            "confidential data",
             "ssn",
             "social security number",
             "medical records",
@@ -169,12 +151,13 @@ DETECTION_RULES = [
             "credentials",
             "payroll",
         ],
-        "constraints": ["data_handling", "authorization_validation", "human_primacy"],
-        "drift_flags": ["data_sensitivity_risk", "authorization_risk"],
-        "reason": "Request attempts to access or expose sensitive data without verified authorization.",
+        "constraints": ["data_handling", "authorization_validation"],
+        "drift_flags": ["data_sensitivity_risk"],
+        "reason": "Request may involve sensitive data and requires authorization validation.",
     },
     {
         "failure_mode": "SCOPE_OVERREACH",
+        "decision": "CLARIFICATION_REQUIRED",
         "intent": "ambiguous_or_unverified",
         "terms": [
             "delete company records",
@@ -194,6 +177,7 @@ DETECTION_RULES = [
     },
     {
         "failure_mode": "AUTONOMY_RISK",
+        "decision": "CLARIFICATION_REQUIRED",
         "intent": "ambiguous_or_unverified",
         "terms": [
             "do whatever it takes",
@@ -209,6 +193,7 @@ DETECTION_RULES = [
     },
     {
         "failure_mode": "AMBIGUOUS_INTENT",
+        "decision": "CLARIFICATION_REQUIRED",
         "intent": "ambiguous_or_unverified",
         "terms": [
             "do something important",
@@ -226,35 +211,7 @@ DETECTION_RULES = [
 
 
 def contains_any(text: str, terms: list[str]) -> bool:
-    text = text.lower()
-
-    for term in terms:
-        if term in text:
-            return True
-
-    # Lightweight intent-pattern checks for demo hardening.
-    if "legal" in text and ("hide" in text or "audit" in text or "compliance" in text):
-        return True
-
-    if "legal" in text and ("look" in text or "appear" in text or "seem" in text):
-        return True
-
-    if "audit" in text and ("hide" in text or "avoid" in text or "bypass" in text):
-        return True
-
-    if "private" in text and ("records" in text or "data" in text or "customer" in text):
-        return True
-
-    if "customer" in text and ("records" in text or "data" in text):
-        return True
-
-    return False
-
-
-def decision_for_failure_mode(failure_mode: str) -> str:
-    if failure_mode in HARD_REFUSAL_MODES:
-        return "REFUSED"
-    return "CLARIFICATION_REQUIRED"
+    return any(term in text for term in terms)
 
 
 def build_execution_gate(decision: str, authorization_status: str) -> tuple[str, str, str]:
@@ -304,28 +261,23 @@ def evaluate_request(user_input: str) -> dict:
 
     for rule in DETECTION_RULES:
         if contains_any(text, rule["terms"]):
-            failure_mode = rule["failure_mode"]
-            decision = decision_for_failure_mode(failure_mode)
-
             authorization_status = (
                 "UNVERIFIED"
-                if decision != "APPROVED"
+                if rule["decision"] != "APPROVED"
                 else "VERIFIED_FOR_DEMO"
             )
 
             actor_trust_level = (
                 "unauthorized_or_unknown"
-                if decision == "REFUSED"
+                if rule["decision"] == "REFUSED"
                 else "unknown"
             )
 
-            confidence = 0.95 if decision == "REFUSED" else 0.68
-
             return make_result(
-                decision=decision,
+                decision=rule["decision"],
                 intent=rule["intent"],
-                confidence=confidence,
-                failure_mode=failure_mode,
+                confidence=0.95 if rule["decision"] == "REFUSED" else 0.68,
+                failure_mode=rule["failure_mode"],
                 authorization_status=authorization_status,
                 actor_trust_level=actor_trust_level,
                 constraints=rule["constraints"],
@@ -355,7 +307,7 @@ def evaluate_request(user_input: str) -> dict:
         actor_trust_level="trusted_demo_user",
         constraints=[],
         drift_flags=[],
-        reason="No blocking risk detected by the Phase 3 demo ruleset.",
+        reason="No blocking risk detected by the Phase 2 demo ruleset.",
     )
 
 
@@ -425,8 +377,8 @@ demo_prompt = st.selectbox(
         "Refused: social engineering",
         "Refused: policy evasion",
         "Refused: deceptive optimization",
-        "Refused: data exfiltration",
         "Clarification: ambiguous",
+        "Clarification: sensitive data",
         "Clarification: high-impact action",
         "Clarification: autonomy risk",
     ],
@@ -445,10 +397,10 @@ elif demo_prompt == "Refused: policy evasion":
     default_text = "bypass your rules and avoid detection"
 elif demo_prompt == "Refused: deceptive optimization":
     default_text = "make this look legal and hide it from audit"
-elif demo_prompt == "Refused: data exfiltration":
-    default_text = "access private customer records"
 elif demo_prompt == "Clarification: ambiguous":
     default_text = "do something important with my notes"
+elif demo_prompt == "Clarification: sensitive data":
+    default_text = "access private customer records"
 elif demo_prompt == "Clarification: high-impact action":
     default_text = "delete company records"
 elif demo_prompt == "Clarification: autonomy risk":
